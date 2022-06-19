@@ -1,0 +1,50 @@
+// https://github.com/golang/vscode-go/wiki/debugging#connecting-to-headless-delve-with-target-specified-at-server-start-up
+// https://code.visualstudio.com/docs/editor/tasks
+{
+    "version": "2.0.0",
+    "cwd": "${workspaceFolder}",
+    "tasks": [
+        {
+            "label": "go install all",
+            "command": "go",
+            "args": ["install", "-v", "./..."],
+            "group": "build",
+            "type": "shell",
+        },
+        {
+            "label": "run current file",
+            "command": "go",
+            "args": ["run", "${file}"],
+            "group": "build",
+            "type": "shell",
+        },
+        {
+            "label": "go test all",
+            "command": "go",
+            "args": ["test", "-v", "./..."],
+            "group": "test",
+            "type": "shell",
+        },
+        {
+            // Required Go command in path
+            "label": "build all platform",
+            "command": "./scripts/build-all.sh",
+            "windows": {
+                // Here i use pseudo git bash on windows because my bash in path is now wsl
+                "command": "C:\\Softs\\Git\\bin\\bash.exe .\\scripts\\build-all.sh"
+            },
+            "args": [],
+            "group": "build",
+            "type": "shell",
+        },
+        {
+            "label": "dlv listen current file",
+            "command": "cd \"${fileDirname}\" && dlv debug --headless --listen=:23456 --log --api-version=2",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build"
+            },
+            "type": "shell",
+        }
+    ]
+}

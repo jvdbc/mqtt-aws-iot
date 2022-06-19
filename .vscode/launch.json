@@ -1,0 +1,74 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run joule-pac-1",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "args": [
+                "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
+                "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
+                "-pkey", "${workspaceFolder}/assets/joule-pac-1/private.key",
+                "-client_id", "joule-pac-1",
+                "-topic", "joule-pac-1/#"
+             ]
+        },
+        {
+            "name": "Run pac-test-jvdbc",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "args": [
+                "-ca_file", "${workspaceFolder}/assets/pac-test-jvdbc/root-CA.cert.pem",
+                "-cert", "${workspaceFolder}/assets/pac-test-jvdbc/cert.pem",
+                "-pkey", "${workspaceFolder}/assets/pac-test-jvdbc/private.key",
+                "-client_id", "pac-test-jvdbc",
+                "-topic", "pac-test-jvdbc/#"
+             ]
+        },
+        {
+            "name": "Publish joule-pac-1",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "args": [
+                "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
+                "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
+                "-pkey", "${workspaceFolder}/assets/joule-pac-1/private.key",
+                "-client_id", "joule-pac-1",
+                "-topic", "joule-pac-1/#",
+                "-publish"
+             ]
+        },
+        {
+            "name": "Attach local process",
+            "type": "go",
+            "request": "attach",
+            "mode": "local",
+            "processId": 0,
+            "apiVersion": 2,
+            "showLog": true
+          },
+        //   https://vscode-debug-specs.github.io/go/#basic
+          {
+            "name": "Attach to server",
+            "type": "go",
+            "request": "attach",
+            // "preLaunchTask": "debug dlv",
+            "mode": "remote",
+            "remotePath": "${workspaceFolder}",
+            "port": 23456,
+            "host": "127.0.0.1",
+            "cwd": "${workspaceFolder}",
+            "apiVersion": 2,
+            "showLog": true
+        }
+    ]
+}
