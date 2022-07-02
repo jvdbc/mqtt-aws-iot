@@ -29,10 +29,10 @@
             // Required Go command in path
             "label": "build all platform",
             "command": "./scripts/build-all.sh",
-            "windows": {
-                // Here i use pseudo git bash on windows because my bash in path is now wsl
-                "command": "C:\\Softs\\Git\\bin\\bash.exe .\\scripts\\build-all.sh"
-            },
+            // "windows": {
+            //     // Here i use pseudo git bash on windows because my bash in path is now wsl
+            //     "command": "C:\\Softs\\Git\\bin\\bash.exe .\\scripts\\build-all.sh"
+            // },
             "args": [],
             "group": "build",
             "type": "shell",

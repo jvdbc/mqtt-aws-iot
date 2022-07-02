@@ -9,7 +9,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
@@ -23,7 +23,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/pac-test-jvdbc/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/pac-test-jvdbc/cert.pem",
@@ -37,15 +37,51 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt/main.go",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
                 "-pkey", "${workspaceFolder}/assets/joule-pac-1/private.key",
                 "-client_id", "joule-pac-1",
-                "-topic", "joule-pac-1/#",
+                "-topic", "joule-pac-1/topic1",
                 "-publish"
              ]
+        },
+        {
+            "name": "Subscribe clenain",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "env": {
+                "AWS_ACCESS_KEY_ID": "<?>",
+                "AWS_SECRET_ACCESS_KEY":"<?>"
+             },
+            "args": [
+                "-port", "443",
+                "-client_id", "joule-pac-1",
+                "-topic", "joule-pac-1/#",
+                "-websocket",
+                "-debug"
+             ]
+        },
+        {
+            "name": "Subscribe clenain with proxy",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "args": [
+                "-proxy_host", "vip-users.proxy.edf.fr",
+                "-proxy_port", "3131",
+                "-port", "443",
+                "-client_id", "joule-pac-1",
+                "-topic", "joule-pac-1/#"
+             ],
+             "env": {
+                "AWS_ACCESS_KEY_ID": "<?>",
+                "AWS_SECRET_ACCESS_KEY":"<?>"
+             }
         },
         {
             "name": "Attach local process",
