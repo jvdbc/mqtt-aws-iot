@@ -26,7 +26,7 @@ do
             cd "${f}"
             mkdir -p ${BUILD_PATH}/${DIRNAME}
             # TODO debug option in param
-            go build -gcflags=all="-N -l" -o ${BUILD_PATH}/${DIRNAME} -ldflags "-X main.version=`git tag --sort=-version:refname | head -n 1` .
+            go build -gcflags=all="-N -l" -o ${BUILD_PATH}/${DIRNAME} -ldflags "-X main.version=`git tag --sort=-version:refname | head -n 1`" .
             if [ $? -ne 0 ]; then
                 echo 'An error has occurred! Aborting the script execution...'
                 exit 1
