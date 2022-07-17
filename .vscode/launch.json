@@ -5,11 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run joule-pac-1",
+            "name": "Subscribe joule-pac-1",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
@@ -19,11 +19,11 @@
              ]
         },
         {
-            "name": "Run pac-test-jvdbc",
+            "name": "Subscribe pac-test-jvdbc",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/pac-test-jvdbc/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/pac-test-jvdbc/cert.pem",
@@ -33,11 +33,25 @@
              ]
         },
         {
+            "name": "Subscribe pac-test-pi",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
+            "args": [
+                "-ca_file", "${workspaceFolder}/assets/pac-test-pi/root-CA.cert.pem",
+                "-cert", "${workspaceFolder}/assets/pac-test-pi/cert.pem",
+                "-pkey", "${workspaceFolder}/assets/pac-test-pi/private.key",
+                "-client_id", "pac-test-pi",
+                "-topic", "pac-test-pi/#"
+             ]
+        },
+        {
             "name": "Publish joule-pac-1",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
             "args": [
                 "-ca_file", "${workspaceFolder}/assets/joule-pac-1/root-CA.cert.pem",
                 "-cert", "${workspaceFolder}/assets/joule-pac-1/cert.pem",
@@ -48,11 +62,11 @@
              ]
         },
         {
-            "name": "Subscribe clenain",
+            "name": "Subscribe websocket clenain",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
             "env": {
                 "AWS_ACCESS_KEY_ID": "<?>",
                 "AWS_SECRET_ACCESS_KEY":"<?>"
@@ -66,22 +80,25 @@
              ]
         },
         {
-            "name": "Subscribe clenain with proxy",
+            "name": "Subscribe websocket clenain with proxy",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/sc-mqtt-clt",
-            "args": [
-                "-proxy_host", "vip-users.proxy.edf.fr",
-                "-proxy_port", "3131",
-                "-port", "443",
-                "-client_id", "joule-pac-1",
-                "-topic", "joule-pac-1/#"
-             ],
+            "program": "${workspaceFolder}/cmd/mqtt-clt",
              "env": {
                 "AWS_ACCESS_KEY_ID": "<?>",
-                "AWS_SECRET_ACCESS_KEY":"<?>"
-             }
+                "AWS_SECRET_ACCESS_KEY":"<?>",
+                "HTTP_PROXY": "http://vip-users.proxy.edf.fr:3131",
+                "HTTPS_PROXY": "http://vip-users.proxy.edf.fr:3131"
+                // "HTTP_PROXY": "http://localhost:8888",
+                // "HTTPS_PROXY": "http://localhost:8888"
+             },
+            "args": [
+                "-port", "443",
+                "-client_id", "joule-pac-n",
+                "-topic", "joule-pac-1/#",
+                "-websocket"
+             ]
         },
         {
             "name": "Attach local process",
