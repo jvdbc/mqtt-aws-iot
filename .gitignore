@@ -19,3 +19,4 @@
 build/*.exe
 build/*
 assets/*_accessKeys.csv
+build_old/*.*
