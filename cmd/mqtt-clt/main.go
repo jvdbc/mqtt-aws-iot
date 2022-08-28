@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"golang.org/x/net/proxy"
@@ -15,30 +18,82 @@ const (
 	AwsSecretKeyEnvVarName = "AWS_SECRET_ACCESS_KEY"
 )
 
+var (
+	InfoLog = log.New(os.Stdout, "[INFO] ", log.LstdFlags)
+)
+
 func start(endpoint string, port uint, cafile string, keyfile string, certfile string, clientid string, topic string, publish bool,
 	websocket bool, awsregion string, awsaccesskey string, awssecretkey string) {
 
-	client := New(endpoint, port, topic, clientid, websocket, awsregion, publish)
+	client := New(endpoint, port, clientid)
 	defer client.CloseMqtt(250)
 
-	client.
-		Config(cafile, keyfile, certfile).
-		connect().
-		publish().
-		subscribe().
-		fatalIfErr().
-		waitMessages()
+	switch websocket {
+	case true:
+		fatalIfErr(client.ConnectWS(awsregion))
+	default:
+		fatalIfErr(client.Connect(cafile, keyfile, certfile))
+	}
+
+	switch publish {
+	case true:
+		inputMsg, err := readStdin()
+		fatalIfErr(err)
+		fatalIfErr(client.Publish(topic, inputMsg))
+	default:
+		fatalIfErr(client.Subscribe(topic))
+		wait()
+	}
 }
 
-// TODO Implement proper log info
 func info(format string, args ...any) {
-	log.Printf(format, args...)
+	InfoLog.Printf(format, args...)
 }
 
 // Pre-register custom HTTP proxy dialers for use with proxy.FromEnvironment call by paho.mqtt.openConnection
 func init() {
 	proxy.RegisterDialerType("http", newHTTPProxy)
 	proxy.RegisterDialerType("https", newHTTPProxy)
+}
+
+func wait() {
+	// TODO better wait with quit base on chan ?
+	info("wait messages...\n")
+	time.Sleep(MaxDuration)
+}
+
+// https://flaviocopes.com/go-shell-pipes/
+func readStdin() ([]byte, error) {
+	stdInfo, err := os.Stdin.Stat()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read from stdin: %w", err)
+	}
+
+	if (stdInfo.Mode() & os.ModeCharDevice) != 0 {
+		return nil, errors.New("publish is intended to work with input pipe message")
+	}
+
+	var lines []byte
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Bytes()...)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read input message %w", err)
+	}
+
+	return lines, nil
+}
+
+func fatalIfErr(args ...interface{}) {
+	for _, arg := range args {
+		switch err := arg.(type) {
+		case error:
+			log.Fatalf("%s\n", err)
+		}
+	}
 }
 
 func main() {
@@ -82,7 +137,7 @@ func main() {
 		}
 
 		if *port == 8883 {
-			fmt.Fprintf(os.Stdout, "Warning : you still used default port for mqtt over websocket !\n")
+			fmt.Fprintf(os.Stdout, "warning : you still used default port for mqtt over websocket !\n")
 		}
 	} else if *cafile == "" || *pkey == "" || *cert == "" {
 		flag.Usage()

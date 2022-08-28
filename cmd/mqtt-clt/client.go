@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -27,9 +27,6 @@ const (
 	MaxDuration      time.Duration = 1<<63 - 1
 	IotServiceName                 = "iotdevicegateway"
 	EmptyPayloadHash               = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
-	PublishAction mqttAction = iota
-	SubscribeAction
 )
 
 func If[T any](cond bool, vtrue, vfalse T) T {
@@ -39,95 +36,122 @@ func If[T any](cond bool, vtrue, vfalse T) T {
 	return vfalse
 }
 
-func New(endpoint string, port uint, topic string, clientid string, websocket bool, awsregion string, publish bool) *Client {
+func New(endpoint string, port uint, clientid string) *Client {
 	clt := &Client{
-		Topic:      topic,
-		ClientId:   clientid,
-		Websocket:  websocket,
-		AwsRegion:  awsregion,
-		mqttAction: If(publish, PublishAction, SubscribeAction),
+		Endpoint: endpoint,
+		Port:     port,
+		ClientId: clientid,
 	}
 
 	clt.
-		ctrlC().
-		initBrokerUrl(endpoint, port)
+		ctrlC()
 
 	return clt
 }
 
-type mqttAction int16
-
-func (a mqttAction) isPublishAction() bool {
-	return a == PublishAction
-}
-
-func (a mqttAction) isSubscribeAction() bool {
-	return a == SubscribeAction
-}
-
 type Client struct {
-	Topic       string
-	Websocket   bool
-	InputMsg    []byte
-	AwsRegion   string
-	BrokerUrl   string
-	ClientId    string
-	err         error
-	config      *tls.Config
-	mqttCltOpts *mqtt.ClientOptions
-	mqttClt     mqtt.Client
-	mqttAction
+	Endpoint  string
+	Port      uint
+	Topic     string
+	InputMsg  []byte
+	AwsRegion string
+	ClientId  string
+
+	mqttClt mqtt.Client
 }
 
-func (h *Client) CloseMqtt(quiesce uint) *Client {
+func (h *Client) CloseMqtt(quiesce uint) {
 	// no exit if err (used by fatalIfErr)
 	if h.mqttClt != nil && h.mqttClt.IsConnected() {
-
-		info("Close mqtt\n")
+		info("close mqtt\n")
 		h.mqttClt.Disconnect(quiesce)
 		time.Sleep(time.Duration(quiesce))
 	}
-
-	return h
 }
 
-func (h *Client) Config(cafile string, keyfile string, certfile string) *Client {
-	if h.abort() {
-		return h
+func (h *Client) Connect(cafile string, keyfile string, certfile string) error {
+	var tlsConfig *tls.Config
+	var err error
+
+	if tlsConfig, err = newTlsConfig(cafile, keyfile, certfile); err != nil {
+		return fmt.Errorf("failed to create mqtt connection: %w", err)
 	}
 
-	return h.
-		tlsConfig(cafile, keyfile, certfile).
-		cltOpts()
+	mqttCltOpts := newCltOpts(
+		fmt.Sprintf("tls://%s:%v", h.Endpoint, h.Port),
+		h.ClientId,
+		tlsConfig)
+
+	info("open mqtt\n")
+	h.mqttClt = mqtt.NewClient(mqttCltOpts)
+
+	if token := h.mqttClt.Connect(); token.Wait() && token.Error() != nil {
+		return fmt.Errorf("failed to create mqtt connection: %w", token.Error())
+	}
+
+	return nil
 }
 
-func (h *Client) abort() bool {
-	return h.err != nil
+func (h *Client) ConnectWS(awsRegion string) error {
+	h.AwsRegion = awsRegion
+
+	// 86400 => 24h
+	// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+	mqttCltOpts := newCltOpts(
+		fmt.Sprintf("wss://%s:%v/mqtt?X-Amz-Expires=86400", h.Endpoint, h.Port),
+		h.ClientId,
+		newTlsConfigWS())
+
+	mqttCltOpts.SetCustomOpenConnectionFn(h.sigV4WebsocketOpenConnection)
+
+	info("open mqtt on websocket\n")
+	h.mqttClt = mqtt.NewClient(mqttCltOpts)
+
+	if token := h.mqttClt.Connect(); token.Wait() && token.Error() != nil {
+		return fmt.Errorf("failed to create mqtt on websocket connection: %w", token.Error())
+	}
+
+	return nil
 }
 
-func (h *Client) error(format string, a ...any) *Client {
-	h.err = fmt.Errorf(format, a...)
-	return h
+func (h *Client) Publish(topic string, inputMsg []byte) error {
+	if h.mqttClt == nil {
+		return errors.New("mqtt client is nil, you need to call Connect before publish")
+	}
+
+	info("send message to %s\n", topic)
+	if token := h.mqttClt.Publish(topic, 0, false, inputMsg); token.Wait() && token.Error() != nil {
+		return fmt.Errorf("failed to send message: %w", token.Error())
+	}
+
+	return nil
+}
+
+func (h *Client) Subscribe(topic string) error {
+	if h.mqttClt == nil {
+		return errors.New("mqtt client is nil, you need to call Connect before Subscribe")
+	}
+
+	info("subscribe on %s\n", topic)
+	if token := h.mqttClt.Subscribe(topic, 0, nil); token.Wait() && token.Error() != nil {
+		return fmt.Errorf("failed to subscribe: %w", token.Error())
+	}
+
+	return nil
 }
 
 // https://github.com/at-wat/mqtt-go/blob/master/examples/wss-presign-url/main.go
 // https://github.com/seqsense/aws-iot-device-sdk-go/blob/master/presigner/presign.go
 // https://aws.github.io/aws-sdk-go-v2/docs/making-requests/
-func (h *Client) sigV4WebsocketOpenConnection(uri *url.URL, options mqtt.ClientOptions) (net.Conn, error) {
+func (h *Client) sigV4WebsocketOpenConnection(url *url.URL, options mqtt.ClientOptions) (net.Conn, error) {
 	var cfg aws.Config
 	var err error
-	var url *url.URL
 	var creds aws.Credentials
 	var presignedUrl string
 	var presignedHeader http.Header
 
 	ctx := context.TODO()
 	if cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(h.AwsRegion)); err != nil {
-		return nil, err
-	}
-
-	signer := v4.NewSigner()
-	if url, err = url.Parse(h.BrokerUrl); err != nil {
 		return nil, err
 	}
 
@@ -140,46 +164,26 @@ func (h *Client) sigV4WebsocketOpenConnection(uri *url.URL, options mqtt.ClientO
 		return nil, err
 	}
 
+	signer := v4.NewSigner()
 	if presignedUrl, presignedHeader, err = signer.PresignHTTP(
 		ctx, creds, req, EmptyPayloadHash, IotServiceName, cfg.Region, time.Now()); err != nil {
 		return nil, err
 	}
 
-	return mqtt.NewWebsocket(presignedUrl, h.config, 20*time.Second, presignedHeader, nil)
+	return mqtt.NewWebsocket(presignedUrl, options.TLSConfig, 20*time.Second, presignedHeader, nil)
 }
 
 // Gracefully shutdown on ctrl+c
 // https://golangcode.com/handle-ctrl-c-exit-in-terminal/
-func (h *Client) ctrlC() *Client {
-	if h.abort() {
-		return h
-	}
-
+func (h *Client) ctrlC() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-quit
 		h.CloseMqtt(250)
-		info("Bye\n")
+		info("bye\n")
 		os.Exit(0)
 	}()
-	return h
-}
-
-func (h *Client) initBrokerUrl(endpoint string, port uint) *Client {
-	if h.abort() {
-		return h
-	}
-
-	if h.Websocket {
-		// 86400 => 24h
-		// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
-		h.BrokerUrl = fmt.Sprintf("wss://%s:%v/mqtt?X-Amz-Expires=86400", endpoint, port)
-	} else {
-		h.BrokerUrl = fmt.Sprintf("tls://%s:%v", endpoint, port)
-	}
-
-	return h
 }
 
 // https://www.emqx.com/en/blog/how-to-use-mqtt-in-golang
@@ -187,13 +191,9 @@ func (h *Client) initBrokerUrl(endpoint string, port uint) *Client {
 // https://github.com/seqsense/aws-iot-device-sdk-go/blob/master/dialer.go
 // https://docs.aws.amazon.com/sdk-for-go/api/aws/signer/v4/
 // https://github.com/aws/aws-sdk-go/blob/main/aws/signer/v4/v4.go
-func (h *Client) tlsConfig(cafile string, keyfile string, certfile string) *Client {
-	if h.abort() {
-		return h
-	}
-
+func newTlsConfig(cafile string, keyfile string, certfile string) (*tls.Config, error) {
 	// Create tls.Config with desired tls properties
-	h.config = &tls.Config{
+	mqttConfig := &tls.Config{
 		// ClientAuth = whether to request cert from server.
 		// Since the server is set up for SSL, this happens
 		// anyways.
@@ -202,152 +202,49 @@ func (h *Client) tlsConfig(cafile string, keyfile string, certfile string) *Clie
 		ClientCAs: nil,
 	}
 
-	if h.Websocket {
-		h.config.InsecureSkipVerify = true
-	} else {
-		// Import trusted certificates from CAfile.pem.
-		certpool := x509.NewCertPool()
-		pemCerts, err := ioutil.ReadFile(cafile)
-		if err != nil {
-			return h.error("Failed to read root ca file: %v", err)
-		}
-
-		certpool.AppendCertsFromPEM(pemCerts)
-
-		// Import client certificate/key pair.
-		cert, err := tls.LoadX509KeyPair(certfile, keyfile)
-		if err != nil {
-			return h.error("Failed to load cert/pkey files: %v", err)
-		}
-
-		h.config.RootCAs = certpool
-		h.config.Certificates = []tls.Certificate{cert}
+	certpool := x509.NewCertPool()
+	pemCerts, err := ioutil.ReadFile(cafile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read root ca file: %w", err)
 	}
 
-	return h
+	certpool.AppendCertsFromPEM(pemCerts)
+
+	// Import client certificate/key pair.
+	cert, err := tls.LoadX509KeyPair(certfile, keyfile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load cert/pkey files: %w", err)
+	}
+
+	mqttConfig.RootCAs = certpool
+	mqttConfig.Certificates = []tls.Certificate{cert}
+
+	return mqttConfig, nil
 }
 
-func (h *Client) cltOpts() *Client {
-	if h.abort() {
-		return h
+func newTlsConfigWS() *tls.Config {
+	// Create tls.Config with desired tls properties
+	tlsConfig := &tls.Config{
+		// ClientAuth = whether to request cert from server.
+		// Since the server is set up for SSL, this happens
+		// anyways.
+		ClientAuth: tls.NoClientCert,
+		// ClientCAs = certs used to validate client cert.
+		ClientCAs: nil,
 	}
 
-	h.mqttCltOpts = mqtt.NewClientOptions().
-		AddBroker(h.BrokerUrl).
-		SetClientID(h.ClientId).
-		SetTLSConfig(h.config).
+	tlsConfig.InsecureSkipVerify = true
+
+	return tlsConfig
+}
+
+func newCltOpts(server string, clientId string, tlsConfig *tls.Config) *mqtt.ClientOptions {
+	return mqtt.NewClientOptions().
+		AddBroker(server).
+		SetClientID(clientId).
+		SetTLSConfig(tlsConfig).
 		SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
-			log.Printf("Received message on topic: %s\n", msg.Topic())
+			log.Printf("received message on topic: %s\n", msg.Topic())
 			fmt.Printf("%s\n", msg.Payload())
 		})
-
-	if h.Websocket {
-		h.mqttCltOpts.SetCustomOpenConnectionFn(h.sigV4WebsocketOpenConnection)
-	}
-
-	return h
-}
-
-// https://flaviocopes.com/go-shell-pipes/
-func readStdin() ([]byte, error) {
-	stdInfo, err := os.Stdin.Stat()
-
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read from stdin: %v", err)
-	}
-
-	if (stdInfo.Mode() & os.ModeCharDevice) != 0 {
-		return nil, fmt.Errorf("Publish is intended to work with input pipe message")
-	}
-
-	var lines []byte
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Bytes()...)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("Failed to read input message %v", err)
-	}
-
-	return lines, nil
-}
-
-func (h *Client) connect() *Client {
-	if h.abort() {
-		return h
-	}
-
-	if h.mqttCltOpts == nil {
-		return h.error("Mqtt client options is nil")
-	}
-
-	info("Open mqtt\n")
-	h.mqttClt = mqtt.NewClient(h.mqttCltOpts)
-
-	if token := h.mqttClt.Connect(); token.Wait() && token.Error() != nil {
-		return h.error("Failed to create mqtt connection: %v", token.Error())
-	}
-
-	return h
-}
-
-func (h *Client) publish() *Client {
-	if h.abort() || !h.isPublishAction() {
-		return h
-	}
-
-	if h.mqttClt == nil {
-		return h.error("Mqtt client options is nil")
-	}
-
-	inputMsg, err := readStdin()
-	if err != nil {
-		return h.error("Failed to read stdin: %v", err)
-	}
-
-	info("Send message to %s\n", h.Topic)
-	if token := h.mqttClt.Publish(h.Topic, 0, false, inputMsg); token.Wait() && token.Error() != nil {
-		return h.error("Failed to send message: %v", token.Error())
-	}
-
-	return h
-}
-
-func (h *Client) subscribe() *Client {
-	if h.abort() || !h.isSubscribeAction() {
-		return h
-	}
-
-	if h.mqttClt == nil {
-		return h.error("Mqtt client options is nil")
-	}
-
-	info("Subscribe on %s\n", h.Topic)
-	if token := h.mqttClt.Subscribe(h.Topic, 0, nil); token.Wait() && token.Error() != nil {
-		return h.error("Failed to subscribe: %v", token.Error())
-	}
-
-	return h
-}
-
-func (h *Client) fatalIfErr() *Client {
-	if h.err != nil {
-		h.CloseMqtt(250)
-		log.Fatalf("%s\n", h.err)
-	}
-
-	return h
-}
-
-func (h *Client) waitMessages() *Client {
-	if h.abort() || !h.isSubscribeAction() {
-		return h
-	}
-
-	// TODO better wait with quit base on chan ?
-	info("Wait messages...\n")
-	time.Sleep(MaxDuration)
-
-	return h
 }
