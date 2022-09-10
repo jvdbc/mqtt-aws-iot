@@ -3,23 +3,36 @@ package main
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/net/proxy"
 )
 
 const (
 	AwsAccessKeyEnvVarName = "AWS_ACCESS_KEY_ID"
 	AwsSecretKeyEnvVarName = "AWS_SECRET_ACCESS_KEY"
+
+	EndpointFlag  = "endpoint"
+	PortFlag      = "port"
+	CafileFlag    = "ca_file"
+	PkeyFlag      = "pkey"
+	CertFlag      = "cert"
+	ClientidFlag  = "client_id"
+	TopicFlag     = "topic"
+	PublishFlag   = "publish"
+	RegionFlag    = "region"
+	WebsocketFlag = "websocket"
+	DebugFlag     = "debug"
 )
 
 var (
-	InfoLog = log.New(os.Stdout, "[INFO] ", log.LstdFlags)
+	InfoLog  = log.New(os.Stdout, "[INFO] ", log.LstdFlags)
+	ErrorLog = log.New(os.Stderr, "[ERROR] ", log.LstdFlags)
 )
 
 func start(endpoint string, port uint, cafile string, keyfile string, certfile string, clientid string, topic string, publish bool,
@@ -46,19 +59,17 @@ func start(endpoint string, port uint, cafile string, keyfile string, certfile s
 	}
 }
 
-func info(format string, args ...any) {
+func infof(format string, args ...any) {
 	InfoLog.Printf(format, args...)
 }
 
-// Pre-register custom HTTP proxy dialers for use with proxy.FromEnvironment call by paho.mqtt.openConnection
-func init() {
-	proxy.RegisterDialerType("http", newHTTPProxy)
-	proxy.RegisterDialerType("https", newHTTPProxy)
+func errorf(format string, args ...any) {
+	ErrorLog.Printf(format, args...)
 }
 
 func wait() {
 	// TODO better wait with quit base on chan ?
-	info("wait messages...\n")
+	infof("wait messages...\n")
 	time.Sleep(MaxDuration)
 }
 
@@ -91,58 +102,123 @@ func fatalIfErr(args ...interface{}) {
 	for _, arg := range args {
 		switch err := arg.(type) {
 		case error:
-			log.Fatalf("%s\n", err)
+			errorf("%s\n", err)
+			os.Exit(1)
 		}
 	}
 }
 
+// Pre-register custom HTTP proxy dialers for use with proxy.FromEnvironment call by paho.mqtt.openConnection
+func init() {
+	proxy.RegisterDialerType("http", newHTTPProxy)
+	proxy.RegisterDialerType("https", newHTTPProxy)
+}
+
 func main() {
-	endpoint := flag.String("endpoint", "a2m9dujvq8fryc-ats.iot.eu-west-1.amazonaws.com", "endpoint to connect")
-	port := flag.Uint("port", 8883, "aws iot supports 8883 for mqtt and 443 for mqtt over websocket")
-	cafile := flag.String("ca_file", "", "path to the root certificate authority file in pem format to thrust")
-	pkey := flag.String("pkey", "", "path to your private key file in pem format")
-	cert := flag.String("cert", "", "path to your client certificate file in pem format")
-	clientid := flag.String("client_id", "joule-pac-1", "client id to use when open mqtt connection")
-	topic := flag.String("topic", "joule-pac-1/topic1", "topic to publish or subscribe filter to use")
-	publish := flag.Bool("publish", false, "if true, use stdin to publish message")
-	awsregion := flag.String("region", "eu-west-1", "aws region parameter when signV4 authentication")
-	websocket := flag.Bool("websocket", false, "wrap mqtt into websocket")
-	debug := flag.Bool("debug", false, "show mqtt connection debug messages")
+	app := &cli.App{
+		Name:    os.Args[0],
+		Version: version,
+		Usage:   "subscribe, publish to aws iot-core devices-gateway",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  EndpointFlag,
+				Value: "a2m9dujvq8fryc-ats.iot.eu-west-1.amazonaws.com",
+				Usage: "endpoint to connect",
+			},
+			&cli.UintFlag{
+				Name:  PortFlag,
+				Value: 8883,
+				Usage: "aws iot supports 8883 for mqtt and 443 for mqtt over websocket",
+			},
+			&cli.StringFlag{
+				Name:  ClientidFlag,
+				Value: "joule-pac-1",
+				Usage: "client id to use when open mqtt connection",
+			},
+			&cli.StringFlag{
+				Name:  TopicFlag,
+				Value: "joule-pac-1/topic1",
+				Usage: "topic to publish or subscribe filter to use",
+			},
+			&cli.BoolFlag{
+				Name:  PublishFlag,
+				Value: false,
+				Usage: "if true, use stdin to publish message",
+			},
+			&cli.StringFlag{
+				Name:  CafileFlag,
+				Value: "",
+				Usage: "path to the root certificate authority file in pem format to thrust",
+			},
+			&cli.StringFlag{
+				Name:  PkeyFlag,
+				Value: "",
+				Usage: "path to your private key file in pem format",
+			},
+			&cli.StringFlag{
+				Name:  CertFlag,
+				Value: "",
+				Usage: "path to your client certificate file in pem format",
+			},
+			&cli.StringFlag{
+				Name:  RegionFlag,
+				Value: "eu-west-1",
+				Usage: "aws region parameter when signV4 authentication",
+			},
+			&cli.BoolFlag{
+				Name:  WebsocketFlag,
+				Value: false,
+				Usage: "if true, wrap mqtt into websocket",
+			},
+			&cli.BoolFlag{
+				Name:  DebugFlag,
+				Value: false,
+				Usage: "if true, show mqtt connection debug messages",
+			},
+		},
+		Action: func(ctx *cli.Context) error {
 
-	awsaccesskey := ""
-	awssecretkey := ""
+			if ctx.Bool(DebugFlag) {
+				mqtt.ERROR = ErrorLog
+				mqtt.CRITICAL = log.New(os.Stdout, "[CRIT] ", 0)
+				mqtt.WARN = log.New(os.Stdout, "[WARN]  ", 0)
+				mqtt.DEBUG = log.New(os.Stdout, "[DEBUG] ", 0)
+			}
 
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s, version %s: \n", os.Args[0], version)
-		flag.PrintDefaults()
+			awsaccesskey := ""
+			awssecretkey := ""
+
+			if ctx.Bool(WebsocketFlag) {
+				awsaccesskey = os.Getenv(AwsAccessKeyEnvVarName)
+				awssecretkey = os.Getenv(AwsSecretKeyEnvVarName)
+
+				if awsaccesskey == "" || awssecretkey == "" {
+					return fmt.Errorf("%s and %s should be set in environment variables with websocket mode", AwsAccessKeyEnvVarName, AwsSecretKeyEnvVarName)
+				}
+
+				if ctx.Uint(PortFlag) == 8883 {
+					fmt.Println("warning : you still used default port for mqtt over websocket !")
+				}
+			} else if ctx.String(CafileFlag) == "" || ctx.String(PkeyFlag) == "" || ctx.String(CertFlag) == "" {
+				return fmt.Errorf("%s, %s and %s should not be empty in mqtt mode", CafileFlag, PkeyFlag, CertFlag)
+			}
+
+			start(
+				ctx.String(EndpointFlag), ctx.Uint(PortFlag),
+				ctx.String(CafileFlag), ctx.String(PkeyFlag), ctx.String(CertFlag),
+				ctx.String(ClientidFlag),
+				ctx.String(TopicFlag),
+				ctx.Bool(PublishFlag),
+				ctx.Bool(WebsocketFlag),
+				ctx.String(RegionFlag),
+				awsaccesskey, awssecretkey)
+
+			return nil
+		},
 	}
 
-	flag.Parse()
-
-	if *debug {
-		mqtt.ERROR = log.New(os.Stdout, "[ERROR] ", 0)
-		mqtt.CRITICAL = log.New(os.Stdout, "[CRIT] ", 0)
-		mqtt.WARN = log.New(os.Stdout, "[WARN]  ", 0)
-		mqtt.DEBUG = log.New(os.Stdout, "[DEBUG] ", 0)
-	}
-
-	// TODO Proper args check
-	if *websocket {
-		awsaccesskey = os.Getenv(AwsAccessKeyEnvVarName)
-		awssecretkey = os.Getenv(AwsSecretKeyEnvVarName)
-
-		if awsaccesskey == "" || awssecretkey == "" {
-			fmt.Fprintf(os.Stderr, "%s and %s should be set in environment variables with websocket mode\n", AwsAccessKeyEnvVarName, AwsSecretKeyEnvVarName)
-			os.Exit(1)
-		}
-
-		if *port == 8883 {
-			fmt.Fprintf(os.Stdout, "warning : you still used default port for mqtt over websocket !\n")
-		}
-	} else if *cafile == "" || *pkey == "" || *cert == "" {
-		flag.Usage()
+	if err := app.Run(os.Args); err != nil {
+		errorf("%s\n", err)
 		os.Exit(1)
 	}
-
-	start(*endpoint, *port, *cafile, *pkey, *cert, *clientid, *topic, *publish, *websocket, *awsregion, awsaccesskey, awssecretkey)
 }

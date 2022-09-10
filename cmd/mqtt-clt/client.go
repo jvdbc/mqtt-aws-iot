@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -44,7 +43,7 @@ func New(endpoint string, port uint, clientid string) *Client {
 	}
 
 	clt.
-		ctrlC()
+		addCtrlC()
 
 	return clt
 }
@@ -63,7 +62,7 @@ type Client struct {
 func (h *Client) CloseMqtt(quiesce uint) {
 	// no exit if err (used by fatalIfErr)
 	if h.mqttClt != nil && h.mqttClt.IsConnected() {
-		info("close mqtt\n")
+		infof("close mqtt\n")
 		h.mqttClt.Disconnect(quiesce)
 		time.Sleep(time.Duration(quiesce))
 	}
@@ -82,7 +81,7 @@ func (h *Client) Connect(cafile string, keyfile string, certfile string) error {
 		h.ClientId,
 		tlsConfig)
 
-	info("open mqtt\n")
+	infof("open mqtt\n")
 	h.mqttClt = mqtt.NewClient(mqttCltOpts)
 
 	if token := h.mqttClt.Connect(); token.Wait() && token.Error() != nil {
@@ -104,7 +103,7 @@ func (h *Client) ConnectWS(awsRegion string) error {
 
 	mqttCltOpts.SetCustomOpenConnectionFn(h.sigV4WebsocketOpenConnection)
 
-	info("open mqtt on websocket\n")
+	infof("open mqtt on websocket\n")
 	h.mqttClt = mqtt.NewClient(mqttCltOpts)
 
 	if token := h.mqttClt.Connect(); token.Wait() && token.Error() != nil {
@@ -119,7 +118,7 @@ func (h *Client) Publish(topic string, inputMsg []byte) error {
 		return errors.New("mqtt client is nil, you need to call Connect before publish")
 	}
 
-	info("send message to %s\n", topic)
+	infof("send message to %s\n", topic)
 	if token := h.mqttClt.Publish(topic, 0, false, inputMsg); token.Wait() && token.Error() != nil {
 		return fmt.Errorf("failed to send message: %w", token.Error())
 	}
@@ -132,7 +131,7 @@ func (h *Client) Subscribe(topic string) error {
 		return errors.New("mqtt client is nil, you need to call Connect before Subscribe")
 	}
 
-	info("subscribe on %s\n", topic)
+	infof("subscribe on %s\n", topic)
 	if token := h.mqttClt.Subscribe(topic, 0, nil); token.Wait() && token.Error() != nil {
 		return fmt.Errorf("failed to subscribe: %w", token.Error())
 	}
@@ -175,13 +174,13 @@ func (h *Client) sigV4WebsocketOpenConnection(url *url.URL, options mqtt.ClientO
 
 // Gracefully shutdown on ctrl+c
 // https://golangcode.com/handle-ctrl-c-exit-in-terminal/
-func (h *Client) ctrlC() {
+func (h *Client) addCtrlC() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-quit
 		h.CloseMqtt(250)
-		info("bye\n")
+		infof("bye\n")
 		os.Exit(0)
 	}()
 }
@@ -193,7 +192,7 @@ func (h *Client) ctrlC() {
 // https://github.com/aws/aws-sdk-go/blob/main/aws/signer/v4/v4.go
 func newTlsConfig(cafile string, keyfile string, certfile string) (*tls.Config, error) {
 	// Create tls.Config with desired tls properties
-	mqttConfig := &tls.Config{
+	tlsConfig := &tls.Config{
 		// ClientAuth = whether to request cert from server.
 		// Since the server is set up for SSL, this happens
 		// anyways.
@@ -216,10 +215,10 @@ func newTlsConfig(cafile string, keyfile string, certfile string) (*tls.Config, 
 		return nil, fmt.Errorf("failed to load cert/pkey files: %w", err)
 	}
 
-	mqttConfig.RootCAs = certpool
-	mqttConfig.Certificates = []tls.Certificate{cert}
+	tlsConfig.RootCAs = certpool
+	tlsConfig.Certificates = []tls.Certificate{cert}
 
-	return mqttConfig, nil
+	return tlsConfig, nil
 }
 
 func newTlsConfigWS() *tls.Config {
@@ -244,7 +243,7 @@ func newCltOpts(server string, clientId string, tlsConfig *tls.Config) *mqtt.Cli
 		SetClientID(clientId).
 		SetTLSConfig(tlsConfig).
 		SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
-			log.Printf("received message on topic: %s\n", msg.Topic())
+			infof("received message on topic: %s\n", msg.Topic())
 			fmt.Printf("%s\n", msg.Payload())
 		})
 }
